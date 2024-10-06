@@ -1,0 +1,43 @@
+version: '3'
+
+vars:
+  VERBOSE: '{{ .VERBOSE | default "true" }}'
+
+tasks:
+  default:
+    cmds:
+    - task: install
+    - task: fmt
+    - task: vet
+    - task: lint
+    - task: build
+  install:
+    cmds:
+    - go install mvdan.cc/gofumpt@latest
+    - go install golang.org/x/tools/go/analysis/passes/nilness/cmd/nilness@latest
+    - go mod tidy
+  build:
+    cmds:
+    - 'ls ./cmd/ | xargs -I% go build -o ./bin/ ./cmd/%'
+  clean:
+    cmds:
+    - rm -rf ./bin/*
+  fmt:
+    cmds:
+    - goimports {{if eq .VERBOSE "true"}}-l{{end}} -w .
+    - gofumpt {{if eq .VERBOSE "true"}}-l{{end}} -w .
+  vet:
+    cmds:
+    - go vet ./...
+  test:
+    cmds:
+    - go test {{if eq .VERBOSE "true"}}-v{{end}} ./...
+  lint:
+    cmds:
+    - task: vet
+    - nilness ./...
+    - golangci-lint run {{if eq .VERBOSE "true"}}--verbose{{end}}
+  upgrade:
+    cmds:
+    - go get -u ./...
+    - go mod tidy
