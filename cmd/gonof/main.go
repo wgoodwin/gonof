@@ -9,14 +9,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/guptarohit/asciigraph"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/wgoodwin/gonof/rules"
 )
 
 func main() {
 	file := flag.String("file", os.Getenv("GONOF_FILE"), "file storing gonof data in csv format")
 	day := flag.Int("day", 0, "day to reference when updating, defaults to next unwritten day")
 	update := flag.Bool("update", false, "whether or not to update data, will show the last 10 days regardless")
+	ekg := flag.Bool("ekg", true, "whether or not to display dopamine score ekg graph")
 	flag.Parse()
 
 	if *file == "" {
@@ -53,6 +56,37 @@ func main() {
 	}
 	writeRecords(recordsToShow, keys, *update)
 
+	if *ekg {
+		fmt.Println()
+		ruleMap := map[string]rules.Rule{
+			"Meditation (minutes)": rules.NewChainRule(
+				rules.NewEqualRule(0, -10),
+				rules.NewLTRule(16, 3),
+				rules.NewGTRule(15, 10),
+			),
+			"Sleep (hours)": rules.NewChainRule(
+				rules.NewLTRule(6, -10),
+				rules.NewLTRule(7, 5),
+				rules.NewLTRule(8, 6.5),
+				rules.NewLTRule(9, 10),
+				rules.NewGTRule(9, 6),
+				rules.NewElseRule(10),
+			),
+			"Connection":       rules.NewYesNoRule(5, -5),
+			"Purpose Building": rules.NewYesNoRule(6, -5),
+			"Workout":          rules.NewYesNoRule(8, -5),
+			"Social Media (minutes)": rules.NewChainRule(
+				rules.NewLTRule(10, 10),
+				rules.NewLTRule(30, 4),
+				rules.NewLTRule(60, -7),
+				rules.NewLTRule(90, -8),
+				rules.NewElseRule(-10),
+			),
+		}
+		dopamineScores := calculateDopamineScores(keys, allRecords, ruleMap)
+		fmt.Println(asciigraph.Plot(dopamineScores, asciigraph.Height(5)))
+	}
+
 	if *update {
 		nextDay := 1
 
@@ -61,6 +95,7 @@ func main() {
 			if err != nil {
 				panic(err)
 			}
+			nextDay++ // increment for the real next day
 		}
 
 		var dayRecord = len(allRecords)
@@ -88,34 +123,37 @@ func main() {
 		flushRecords(*file, keys, allRecords...)
 	}
 
-	// TODO Update this and add graphing logic
-	/*
-		ruleMap := map[string]rules.Rule{
-			"Meditation": rules.NewChainRule(
-				rules.NewEqualRule(0, -10),
-				rules.NewLTRule(16, 3),
-				rules.NewGTRule(15, 10),
-			),
-			"Sleep": rules.NewChainRule(
-				rules.NewLTRule(6, -10),
-				rules.NewLTRule(7, 5),
-				rules.NewLTRule(8, 6.5),
-				rules.NewLTRule(9, 10),
-				rules.NewGTRule(9, 6),
-				rules.NewElseRule(10),
-			),
-			"Connection":       rules.NewYesNoRule(5, -5),
-			"Purpose Building": rules.NewYesNoRule(6, -5),
-			"Workout":          rules.NewYesNoRule(8, -5),
-			"Social Media": rules.NewChainRule(
-				rules.NewLTRule(10, 10),
-				rules.NewLTRule(30, 4),
-				rules.NewLTRule(60, -7),
-				rules.NewLTRule(90, -8),
-				rules.NewElseRule(-10),
-			),
+}
+
+func calculateDopamineScores(headers []string, records [][]string, rulesMap map[string]rules.Rule) []float64 {
+	var result []float64
+
+	for _, row := range records {
+		var score float64
+		for index, h := range headers {
+			var checkVal interface{}
+			switch h {
+			case "Mediation (minutes)":
+				fallthrough
+			case "Sleep (hours)":
+				fallthrough
+			case "Social Media (minutes)":
+				checkVal, _ = strconv.ParseFloat(row[index], 64)
+			default:
+				checkVal = row[index]
+			}
+			if r, ok := rulesMap[h]; ok {
+				_, nextScore, err := r.GetScore(checkVal)
+				if err != nil {
+					fmt.Printf("failed check on %v for header %s: %s\n", checkVal, h, err.Error())
+					continue
+				}
+				score += nextScore
+			}
 		}
-	*/
+		result = append(result, score)
+	}
+	return result
 }
 
 func createBaseFile(file string, headers []string) {
@@ -129,7 +167,7 @@ func createBaseFile(file string, headers []string) {
 	writer := csv.NewWriter(f)
 	defer writer.Flush()
 
-	writer.Write(headers)
+	_ = writer.Write(headers)
 }
 
 func flushRecords(file string, headers []string, rows ...[]string) {
@@ -142,9 +180,9 @@ func flushRecords(file string, headers []string, rows ...[]string) {
 	writer := csv.NewWriter(f)
 	defer writer.Flush()
 
-	writer.Write(headers)
+	_ = writer.Write(headers)
 	for _, r := range rows {
-		writer.Write(r)
+		_ = writer.Write(r)
 	}
 }
 
@@ -227,7 +265,7 @@ func runUpdateLoop(keys, row []string) []string {
 		fmt.Println()
 		printOptions(keys, row)
 		fmt.Print("Select an option (or \"done\" to quit): ")
-		fmt.Scanln(&arg)
+		_, _ = fmt.Scanln(&arg)
 		if arg == "done" {
 			break
 		}
@@ -238,7 +276,7 @@ func runUpdateLoop(keys, row []string) []string {
 		}
 
 		fmt.Printf("Enter value for %s or \"done\" to stop: ", keys[keyIndex])
-		fmt.Scanln(&arg)
+		_, _ = fmt.Scanln(&arg)
 		if arg == "done" {
 			break
 		}
